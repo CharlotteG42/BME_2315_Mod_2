@@ -11,11 +11,7 @@ import numpy as np
 import pandas as pd
 
 # Folder that holds slice_info.csv and all of the .npy image files
-DATA_DIR = (
-    Path(__file__).resolve().parent
-    / "FSHD_MRI_data"
-    / "FSHD_TA_MRI_data_0020_TP1_TP2"
-)
+DATA_DIR = Path("FSHD_TA_MRI_data_0020_TP1_TP2")
 
 # Pixels with (water + fat) above this are real tissue.
 # Background outside the leg is mostly 1-3, tissue is in the hundreds.
@@ -52,18 +48,36 @@ def check_sample(row):
     #   check that every TA pixel has some signal (so we never divide by 0)
     #   check that the mask isn't empty
     #   return all the answers as True/False
+
+    # --- Load the three images for this sample ---
     water = np.load(DATA_DIR / row["water_file"])
     fat = np.load(DATA_DIR / row["fat_file"])
     mask_values = np.load(DATA_DIR / row["mask_file"])   # raw 0s and 1s
-    mask = mask_values.astype(bool)
-    denominator = water + fat
+    mask = mask_values.astype(bool)                     # True = TA pixel
+    denominator = water + fat                           # total signal per pixel
 
+    # --- Each check is True if it passes, False if it fails ---
     checks = {
+        # .shape gives (rows, columns); all three must match so the mask
+        # lines up with the images pixel for pixel
         "same size": water.shape == fat.shape == mask.shape,
+
+        # np.unique lists every different value in the mask; it should be
+        # exactly [0, 1] (0 = not TA, 1 = TA)
         "mask is only 0s and 1s": np.array_equal(np.unique(mask_values), [0, 1]),
+
+        # np.isnan finds missing values; .any() is True if there's at least one
+        # (so "not" makes the check True when there are none)
         "no missing values": not (np.isnan(water).any() or np.isnan(fat).any()),
+
+        # MRI signal can't be negative, so the smallest value should be >= 0
         "no negative signal": water.min() >= 0 and fat.min() >= 0,
+
+        # denominator[mask] keeps only the TA pixels; every one of them
+        # needs water + fat > 0 or the fat fraction would divide by zero
         "every TA pixel has signal": np.all(denominator[mask] > 0),
+
+        # mask.sum() counts the TA pixels (True counts as 1); 0 = empty mask
         "mask is not empty": mask.sum() > 0,
     }
     return checks
