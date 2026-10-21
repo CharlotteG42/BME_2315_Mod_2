@@ -1,11 +1,11 @@
 # main.py
-# BME 2315 Module 2: FSHD MRI fat-fraction analysis
+# BME 2315 Module 2: FSHD MRI fat-fraction and interpolation analysis
 #
-# Runs the whole MRI analysis from start to finish without the notebook.
-# Prints the results and saves the 4 figures (figures/ folder) and the
-# summary table (TA_fat_fraction_summary_TP1_TP2.csv).
+# Runs the whole analysis from start to finish without the notebook.
+# Prints the results and saves the 8 figures (figures/ folder) and two
+# tables (TA_fat_fraction_summary_TP1_TP2.csv and interpolated_estimates.csv).
 #
-# PSEUDOCODE:
+# PSEUDOCODE (the whole pipeline):
 #   1. load slice_info.csv (16 rows: 8 locations x 2 visits)
 #   2. run the data checks on every sample and stop if any fail
 #   3. for one example sample (TP1, 40%):
@@ -16,11 +16,22 @@
 #   5. compare TP1 vs TP2 at each location
 #   6. make Figure 3 (profile) and Figure 4 (map grid)
 #   7. save the summary table to a CSV file
+#   --- Interpolation analysis ---
+#   8. load Module2_FSHD_Dataset.csv and find T1 and T2
+#   9. linearly interpolate every subject and measure to T1 and T2
+#  10. compare measures with the SRM and paired t-tests
+#  11. baseline fat fraction vs change (Pearson, Spearman, Welch's t-test)
+#  12. make Figures 5-8 and save the interpolated estimates to a CSV file
+#
+# To run: keep fshd.py, plots.py, interpolation.py, the MRI data folder, and
+# Module2_FSHD_Dataset.csv in this same folder, then run "python main.py"
+# in the VS Code terminal.
 
 import os
 import numpy as np
 import pandas as pd
 from fshd import *
+from interpolation import *
 import plots
 
 # Folder for the saved figures (made if it doesn't exist yet)
@@ -78,9 +89,50 @@ print(compare_visits(profiles_df, "n_muscle_pixels"))
 # --- 6. Figures along the muscle ---
 plots.plot_profile(profiles_df, save_as="figures/fig3_profile.png")
 plots.plot_map_grid(manifest, save_as="figures/fig4_map_grid.png")
-print("\nSaved 4 figures to the figures folder")
+print("\nSaved Figures 1-4 to the figures folder")
 
 # --- 7. Saving the summary table ---
 output_file = "TA_fat_fraction_summary_TP1_TP2.csv"
 profiles_df.to_csv(output_file, index=False)
 print(f"Saved {output_file}")
+
+# =====================================================================
+# INTERPOLATION ANALYSIS
+# =====================================================================
+
+# --- 8. Loading the dataset and choosing T1 and T2 ---
+df = load_dataset()
+T1, T2 = get_common_time_points(df)
+print(f"\nSubjects = {len(df)}, T1 = {T1:.2f} months, T2 = {T2:.2f} months")
+print(f"Extrapolation check: {check_no_extrapolation(df, T1, T2)}")
+
+# --- 9. Interpolating every subject and measure ---
+results = interpolate_all(df, T1, T2)
+
+# --- 10. Comparing sensitivity to change ---
+summary = summarize_sensitivity(results)
+print("\nSensitivity to change (positive SRM = got worse):")
+print(summary[["label", "n_T2", "SRM_T1", "SRM_T2", "pct_worse_T2", "p_T2"]]
+      .sort_values("SRM_T2", ascending=False).round(3).to_string(index=False))
+
+# --- 11. Baseline fat fraction vs change ---
+correlation = baseline_vs_change(results, "ff_mean", "T2")
+groups = compare_groups(results, "ff_mean", "T2", threshold=20)
+print(f"\nBaseline FF vs change: Pearson r = {correlation['pearson_r']:.2f} "
+      f"(p = {correlation['pearson_p']:.3f}), Spearman rho = "
+      f"{correlation['spearman_rho']:.2f} (p = {correlation['spearman_p']:.3f})")
+print(f"Welch's t-test (>= 20% vs < 20%): p = {groups['p_value']:.3f}")
+
+# --- 12. Figures 5-8 and saving the estimates ---
+key_measures = ["ff_mean", "qmt_R", "wr_10", "css"]
+plots.plot_interpolation_example(df, "13-0004", key_measures, T1, T2,
+                                 save_as="figures/fig5_interpolation_example.png")
+plots.plot_cohort_trajectories(df, results, key_measures, T1, T2,
+                               save_as="figures/fig6_cohort_trajectories.png")
+plots.plot_srm(summary, save_as="figures/fig7_srm.png")
+plots.plot_baseline_vs_change(correlation, threshold=20,
+                              save_as="figures/fig8_baseline_vs_change.png")
+print("Saved Figures 5-8 to the figures folder")
+
+results.to_csv("interpolated_estimates.csv", index=False)
+print("Saved interpolated_estimates.csv")
