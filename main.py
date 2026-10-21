@@ -23,9 +23,9 @@
 #  11. baseline fat fraction vs change (Pearson, Spearman, Welch's t-test)
 #  12. make Figures 5-8 and save the interpolated estimates to a CSV file
 #
-# To run: keep fshd.py, plots.py, interpolation.py, the MRI data folder, and
-# Module2_FSHD_Dataset.csv in this same folder, then run "python main.py"
-# in the VS Code terminal.
+# To run: keep fshd.py, plots.py, interpolation.py, the FSHD_MRI_data folder,
+# and Module2_FSHD_Dataset.csv in this project folder, then run
+# "python main.py" in the VS Code terminal.
 
 import os
 import numpy as np
