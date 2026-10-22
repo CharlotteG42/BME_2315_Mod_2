@@ -11,7 +11,11 @@ import numpy as np
 import pandas as pd
 
 # Folder that holds slice_info.csv and all of the .npy image files
-DATA_DIR = Path("FSHD_TA_MRI_data_0020_TP1_TP2")
+DATA_DIR = (
+    Path(__file__).resolve().parent
+    / "FSHD_MRI_data"
+    / "FSHD_TA_MRI_data_0020_TP1_TP2"
+)
 
 # Pixels with (water + fat) above this are real tissue.
 # Background outside the leg is mostly 1-3, tissue is in the hundreds.

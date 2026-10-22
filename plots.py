@@ -1,17 +1,23 @@
 # plots.py
-# BME 2315 Module 2: FSHD MRI fat-fraction analysis
+# BME 2315 Module 2: FSHD MRI fat-fraction and interpolation analysis
 #
-# This file holds the functions that make our 4 figures. Figures 1-3 use the
-# same plotting code as the class example notebook. Each function makes one
-# figure. If you give it a file name (save_as), it saves the figure there;
-# if not, it shows the figure (this is what the notebook does).
+# This file holds the functions that make our 8 figures.
+#   Figures 1-4: MRI Data Analysis Methodology (Figures 1-3 use the same
+#                plotting code as the class example notebook)
+#   Figures 5-8: Interpolation Analysis (follow the class interpolation example)
+# Each function makes one figure. If you give it a file name (save_as), it
+# saves the figure there; if not, it shows the figure (this is what the
+# notebook does).
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import stats
 from fshd import load_sample, calculate_fat_fraction, calculate_fat_fraction_full
+from interpolation import MEASURES, interpolate_subject
 
-# Same colors for each visit in every graph
+# Same colors for each visit (MRI) and each time point (interpolation)
 VISIT_COLORS = {"TP1": "#2a78d6", "TP2": "#eb6834"}   # blue, orange
+TIME_COLORS = {"T1": "#2a78d6", "T2": "#eb6834"}      # blue, orange
 
 
 def show_or_save(save_as):
@@ -218,4 +224,178 @@ def plot_map_grid(manifest, save_as=None):
     fig.colorbar(image, ax=axes, shrink=0.6, label="Fat fraction (%)")
     fig.suptitle("TA-only fat fraction maps along the muscle\n"
                  "(titles: % of muscle length, TP1 distance from start)")
+    show_or_save(save_as)
+
+
+# ===========================================================================
+# INTERPOLATION ANALYSIS FIGURES
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Figure 5: interpolation for one example subject
+# ---------------------------------------------------------------------------
+
+def plot_interpolation_example(df, subject_id, measures, T1, T2, save_as=None):
+    # PSEUDOCODE:
+    #   find this subject's row in the dataset
+    #   make one panel per measure (2 x 2 grid)
+    #   for each measure:
+    #       plot the 3 measured visits, joined by straight lines
+    #           (the straight lines ARE the linear interpolation)
+    #       mark the interpolated estimates at T1 and T2 with diamonds
+    #       draw dashed vertical lines at T1 and T2
+    row = df[df["subject_id"] == subject_id].iloc[0]
+    times = [row["lag_months_baseline"], row["lag_months_y1"], row["lag_months_y2"]]
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8), layout="constrained")
+    axes = axes.flatten()
+
+    for i, measure in enumerate(measures):
+        info = MEASURES[measure]
+        values = [row[c] for c in info["columns"]]
+        value_T1, value_T2 = interpolate_subject(row, info["columns"], T1, T2)
+        ax = axes[i]
+
+        # Measured visits joined by straight lines
+        ax.plot(times, values, color="gray", linestyle="--", zorder=1)
+        ax.scatter(times, values, color="black", s=60, zorder=3,
+                   label="Measured visits")
+
+        # Interpolated estimates at T1 and T2
+        ax.scatter([T1], [value_T1], marker="D", s=90, zorder=4,
+                   color=TIME_COLORS["T1"], label=f"Estimate at T1 = {T1:.1f} mo")
+        ax.scatter([T2], [value_T2], marker="D", s=90, zorder=4,
+                   color=TIME_COLORS["T2"], label=f"Estimate at T2 = {T2:.1f} mo")
+        ax.axvline(T1, color=TIME_COLORS["T1"], linestyle=":", alpha=0.6)
+        ax.axvline(T2, color=TIME_COLORS["T2"], linestyle=":", alpha=0.6)
+
+        ax.set_title(info["label"])
+        ax.set_xlabel("Months since baseline")
+        ax.set_ylabel(f"{info['label']} ({info['units']})")
+        ax.grid(True, alpha=0.3)
+
+    axes[0].legend(fontsize=9)
+    fig.suptitle(f"Linear interpolation for subject {subject_id}")
+    show_or_save(save_as)
+
+
+# ---------------------------------------------------------------------------
+# Figure 6: every subject over time (whole cohort)
+# ---------------------------------------------------------------------------
+
+def plot_cohort_trajectories(df, results, measures, T1, T2, save_as=None):
+    # PSEUDOCODE:
+    #   make one panel per measure (2 x 2 grid)
+    #   for each measure:
+    #       draw one thin gray line per subject through their measured visits
+    #       draw one thick colored line through the group average at
+    #           baseline, T1, and T2 (subjects with all three values)
+    #       draw dashed vertical lines at T1 and T2
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8), layout="constrained")
+    axes = axes.flatten()
+
+    for i, measure in enumerate(measures):
+        info = MEASURES[measure]
+        ax = axes[i]
+
+        # One thin gray line per subject
+        for _, row in df.iterrows():
+            times = [row["lag_months_baseline"], row["lag_months_y1"],
+                     row["lag_months_y2"]]
+            values = [row[c] for c in info["columns"]]
+            ax.plot(times, values, color="gray", alpha=0.35, linewidth=1)
+
+        # Group average at baseline, T1, and T2
+        measure_rows = results[results["measure"] == measure]
+        complete = measure_rows.dropna(subset=["baseline", "value_T1", "value_T2"])
+        averages = [complete["baseline"].mean(), complete["value_T1"].mean(),
+                    complete["value_T2"].mean()]
+        ax.plot([0, T1, T2], averages, color="#eb6834", linewidth=3, marker="o",
+                label=f"Average at baseline, T1, T2 (n = {len(complete)})")
+
+        ax.axvline(T1, color="black", linestyle=":", alpha=0.5)
+        ax.axvline(T2, color="black", linestyle=":", alpha=0.5)
+        ax.set_title(info["label"])
+        ax.set_xlabel("Months since baseline")
+        ax.set_ylabel(f"{info['label']} ({info['units']})")
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=9, loc="best")
+
+    fig.suptitle("Every subject's measured visits (gray) and the group average")
+    show_or_save(save_as)
+
+
+# ---------------------------------------------------------------------------
+# Figure 7: sensitivity to change (SRM) for every measure
+# ---------------------------------------------------------------------------
+
+def plot_srm(summary, save_as=None):
+    # PSEUDOCODE:
+    #   sort the measures by their SRM at T2 (largest at the top)
+    #   draw two horizontal bars per measure: SRM at T1 and at T2
+    #   shade the region from -0.2 to 0.2 ("trivial" change)
+    #   positive SRM = the measure got worse on average
+    summary = summary.sort_values("SRM_T2")
+    positions = np.arange(len(summary))   # 0, 1, 2, ... one per measure
+    bar_height = 0.38
+
+    plt.figure(figsize=(9, 6.5))
+    plt.axvspan(-0.2, 0.2, color="gray", alpha=0.15,
+                label="Trivial change (|SRM| < 0.2)")
+    plt.barh(positions - bar_height / 2, summary["SRM_T1"], height=bar_height,
+             color=TIME_COLORS["T1"], label="Baseline to T1 (~11 months)")
+    plt.barh(positions + bar_height / 2, summary["SRM_T2"], height=bar_height,
+             color=TIME_COLORS["T2"], label="Baseline to T2 (~22 months)")
+    plt.axvline(0, color="black", linewidth=1)
+
+    plt.yticks(positions, summary["label"])
+    plt.xlabel("Standardized response mean (mean change / SD of change)\n"
+               "positive = got worse")
+    plt.title("Sensitivity to change of each measure")
+    plt.legend(loc="lower right", fontsize=9)
+    plt.grid(True, axis="x", alpha=0.3)
+    plt.tight_layout()
+    show_or_save(save_as)
+
+
+# ---------------------------------------------------------------------------
+# Figure 8: baseline fat fraction vs change in fat fraction
+# ---------------------------------------------------------------------------
+
+def plot_baseline_vs_change(result, threshold=20, save_as=None):
+    # PSEUDOCODE:
+    #   scatter plot: baseline fat fraction (x) vs change by T2 (y)
+    #   fit a straight regression line through the points
+    #   print Pearson r, Spearman rho, their p-values, and n on the graph
+    #   draw a dashed line at the 20% threshold and a line at zero change
+    baseline = result["baseline"]
+    change = result["change"]
+
+    # Straight-line fit (slope and intercept)
+    fit = stats.linregress(baseline, change)
+    line_x = np.array([baseline.min(), baseline.max()])
+    line_y = fit.intercept + fit.slope * line_x
+
+    plt.figure(figsize=(8, 5.5))
+    plt.scatter(baseline, change, color="#2a78d6", s=60, zorder=3)
+    plt.plot(line_x, line_y, color="black", linewidth=2, label="Linear regression")
+    plt.axhline(0, color="gray", linewidth=1)
+    plt.axvline(threshold, color="#eb6834", linestyle="--",
+                label=f"{threshold}% baseline fat fraction")
+
+    # Print the test results in the top left corner of the graph
+    plt.text(0.03, 0.97,
+             f"Pearson r = {result['pearson_r']:.2f}, p = {result['pearson_p']:.3f}\n"
+             f"Spearman rho = {result['spearman_rho']:.2f}, "
+             f"p = {result['spearman_p']:.3f}\n"
+             f"n = {result['n']}",
+             transform=plt.gca().transAxes, ha="left", va="top",
+             bbox=dict(facecolor="white", edgecolor="lightgray"))
+
+    plt.title("Baseline TA fat fraction vs. change by T2 (both legs)")
+    plt.xlabel("Baseline fat fraction (%)")
+    plt.ylabel("Change in fat fraction by T2 (percentage points)")
+    plt.legend(loc="lower center")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
     show_or_save(save_as)
