@@ -1,11 +1,17 @@
 # interpolation.py
 # BME 2315 Module 2: FSHD interpolation analysis
 #
-# This file holds the functions for the second half of the project. It loads
-# the natural-history dataset (Module2_FSHD_Dataset.csv), uses linear
-# interpolation to estimate every subject's measurements at two common time
-# points, and compares how sensitive each measure is to change. The
-# interpolation code follows the class example (Module2_interpolation_example).
+# This file holds the functions for the second half of the project. It only
+# DEFINES functions, so running it on its own does nothing; the notebook (or
+# main.py) calls them. There are two parts:
+#   Part A: interpolating fat fraction at a LOCATION along the TA that wasn't
+#           imaged (uses the MRI results from fshd.py)
+#   Part B: interpolating every subject in Module2_FSHD_Dataset.csv to two
+#           common TIME points and comparing how sensitive each measure is
+# The interpolation code follows the class example (Module2_interpolation_example).
+#
+# Keep this file and Module2_FSHD_Dataset.csv in the same folder as the
+# notebook (and main.py).
 
 import numpy as np
 import pandas as pd
@@ -48,6 +54,61 @@ MEASURES = {
                         "clinical_severity_score_y2"], "worse": 1},
 }
 
+
+# ===========================================================================
+# PART A: INTERPOLATING ALONG THE MUSCLE (LOCATION)
+# ===========================================================================
+
+def get_visit_profile(profiles_df, timepoint):
+    # PSEUDOCODE:
+    #   keep the rows for one visit (TP1 or TP2)
+    #   sort them by location along the muscle (10% to 80%)
+    #   x = percent of muscle length, y = mean TA fat fraction
+    visit = profiles_df[profiles_df["timepoint"] == timepoint]
+    visit = visit.sort_values("percent_along_muscle")
+    x = visit["percent_along_muscle"].to_numpy()
+    y = visit["mean_fat_fraction_percent"].to_numpy()
+    return x, y
+
+
+def interpolate_location(profiles_df, timepoint, target_percent):
+    # PSEUDOCODE:
+    #   get the 8 sampled locations and their mean fat fraction for one visit
+    #   check that the target is inside the sampled range (10% to 80%)
+    #       (if not, it would be extrapolation, so return NaN)
+    #   draw straight lines between the sampled locations (interp1d)
+    #   return the estimate at the target location
+    x, y = get_visit_profile(profiles_df, timepoint)
+    if not x.min() <= target_percent <= x.max():
+        return np.nan
+    f_linear = interp1d(x, y, kind="linear")
+    return float(f_linear(target_percent))
+
+
+def leave_one_out(profiles_df, timepoint):
+    # PSEUDOCODE:
+    #   for each inside location (20% to 70%; the ends have only one neighbor):
+    #       pretend that location was never imaged
+    #       estimate it with a straight line between its two neighbors
+    #       error = estimate - real measured value
+    #   return one row per location
+    x, y = get_visit_profile(profiles_df, timepoint)
+    rows = []
+    for i in range(1, len(x) - 1):
+        f_linear = interp1d([x[i - 1], x[i + 1]], [y[i - 1], y[i + 1]],
+                            kind="linear")
+        estimate = float(f_linear(x[i]))
+        rows.append({"timepoint": timepoint,
+                     "percent_along_muscle": x[i],
+                     "measured": y[i],
+                     "estimate": estimate,
+                     "error": estimate - y[i]})
+    return pd.DataFrame(rows)
+
+
+# ===========================================================================
+# PART B: INTERPOLATING OVER TIME (34 SUBJECTS)
+# ===========================================================================
 
 # ---------------------------------------------------------------------------
 # 1. Loading the data and choosing the common time points
@@ -130,6 +191,40 @@ def interpolate_all(df, T1, T2):
                 "change_T2": value_T2 - baseline,
             })
     return pd.DataFrame(results)
+
+
+def class_example_estimates(df, T1, T2):
+    # Part 6 of the class interpolation example, done for every subject.
+    # PSEUDOCODE:
+    #   for each subject, using right TA fat fraction (ff_R):
+    #       linear estimate at T1 (needs baseline + Year 1)
+    #       quadratic estimate at T2 (needs all three visits, in order)
+    #       if there isn't enough data, record NaN instead of crashing
+    #   return subject ID + both estimates (to save as a .csv)
+    columns = MEASURES["ff_R"]["columns"]
+    rows = []
+    for _, row in df.iterrows():
+        times = np.array([row["lag_months_baseline"], row["lag_months_y1"],
+                          row["lag_months_y2"]], dtype=float)
+        values = np.array([row[c] for c in columns], dtype=float)
+
+        # Linear estimate at T1 (baseline and Year 1)
+        estimate_T1 = np.nan
+        if not np.isnan(times[:2]).any() and not np.isnan(values[:2]).any():
+            f_linear = interp1d(times[:2], values[:2], kind="linear")
+            estimate_T1 = float(f_linear(T1))
+
+        # Quadratic estimate at T2 (all three visits)
+        estimate_T2 = np.nan
+        all_present = not (np.isnan(times).any() or np.isnan(values).any())
+        if all_present and times[0] < times[1] < times[2]:
+            f_quadratic = interp1d(times, values, kind="quadratic")
+            estimate_T2 = float(f_quadratic(T2))
+
+        rows.append({"subject_id": row["subject_id"],
+                     "estimate_T1_linear": estimate_T1,
+                     "estimate_T2_quadratic": estimate_T2})
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------

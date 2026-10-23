@@ -1,10 +1,11 @@
 # plots.py
 # BME 2315 Module 2: FSHD MRI fat-fraction and interpolation analysis
 #
-# This file holds the functions that make our 8 figures.
+# This file holds the functions that make our 9 figures.
 #   Figures 1-4: MRI Data Analysis Methodology (Figures 1-3 use the same
 #                plotting code as the class example notebook)
-#   Figures 5-8: Interpolation Analysis (follow the class interpolation example)
+#   Figure 5:    Interpolation along the muscle (location)
+#   Figures 6-9: Interpolation over time (follow the class interpolation example)
 # Each function makes one figure. If you give it a file name (save_as), it
 # saves the figure there; if not, it shows the figure (this is what the
 # notebook does).
@@ -232,7 +233,40 @@ def plot_map_grid(manifest, save_as=None):
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Figure 5: interpolation for one example subject
+# Figure 5: interpolation along the muscle (location)
+# ---------------------------------------------------------------------------
+
+def plot_location_interpolation(profiles_df, target_percent, estimates,
+                                save_as=None):
+    # PSEUDOCODE:
+    #   for each visit (TP1, TP2):
+    #       plot mean fat fraction at the 8 sampled locations, joined by
+    #       straight lines (the straight lines ARE the linear interpolation)
+    #       mark the estimate at the target location with a diamond
+    #   draw a dashed vertical line at the target location
+    plt.figure(figsize=(9, 5))
+    for timepoint, group in profiles_df.groupby("timepoint"):
+        group = group.sort_values("percent_along_muscle")
+        plt.plot(group["percent_along_muscle"],
+                 group["mean_fat_fraction_percent"],
+                 marker="o", color=VISIT_COLORS[timepoint],
+                 label=f"{timepoint} measured")
+        plt.scatter([target_percent], [estimates[timepoint]], marker="D",
+                    s=110, color=VISIT_COLORS[timepoint], edgecolor="black",
+                    zorder=4, label=f"{timepoint} estimate = "
+                                    f"{estimates[timepoint]:.1f}%")
+    plt.axvline(target_percent, color="gray", linestyle="--")
+    plt.ylim(0, 105)   # fat fraction can't go below 0%
+    plt.xlabel("Location along the muscle (% of muscle length)")
+    plt.ylabel("Mean TA fat fraction (%)")
+    plt.title(f"Linear interpolation at {target_percent}% along the TA")
+    plt.legend(ncol=2)
+    plt.grid(True, alpha=0.3)
+    show_or_save(save_as)
+
+
+# ---------------------------------------------------------------------------
+# Figure 6: interpolation for one example subject
 # ---------------------------------------------------------------------------
 
 def plot_interpolation_example(df, subject_id, measures, T1, T2, save_as=None):
@@ -280,7 +314,7 @@ def plot_interpolation_example(df, subject_id, measures, T1, T2, save_as=None):
 
 
 # ---------------------------------------------------------------------------
-# Figure 6: every subject over time (whole cohort)
+# Figure 7: every subject over time (whole cohort)
 # ---------------------------------------------------------------------------
 
 def plot_cohort_trajectories(df, results, measures, T1, T2, save_as=None):
@@ -326,7 +360,7 @@ def plot_cohort_trajectories(df, results, measures, T1, T2, save_as=None):
 
 
 # ---------------------------------------------------------------------------
-# Figure 7: sensitivity to change (SRM) for every measure
+# Figure 8: sensitivity to change (SRM) for every measure
 # ---------------------------------------------------------------------------
 
 def plot_srm(summary, save_as=None):
@@ -359,7 +393,7 @@ def plot_srm(summary, save_as=None):
 
 
 # ---------------------------------------------------------------------------
-# Figure 8: baseline fat fraction vs change in fat fraction
+# Figure 9: baseline fat fraction vs change in fat fraction
 # ---------------------------------------------------------------------------
 
 def plot_baseline_vs_change(result, threshold=20, save_as=None):
